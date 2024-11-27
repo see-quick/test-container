@@ -12,6 +12,8 @@ import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 
@@ -26,6 +28,8 @@ import org.testcontainers.utility.MountableFile;
 class Utils {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(Utils.class);
+
+    protected static final String CURRENT_DATE = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss"));
 
     /**
      * Poll the given {@code ready} function every {@code pollInterval} until it returns true,

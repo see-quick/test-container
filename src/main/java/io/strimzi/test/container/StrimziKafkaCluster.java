@@ -46,6 +46,8 @@ public class StrimziKafkaCluster implements KafkaContainer {
     private final boolean enableSharedNetwork;
     private final String kafkaVersion;
     private final boolean enableKraft;
+    private boolean collectLogs;
+    private String logFilePath;
 
     // not editable
     private final Network network;
@@ -63,6 +65,8 @@ public class StrimziKafkaCluster implements KafkaContainer {
         this.kafkaVersion = builder.kafkaVersion;
         this.enableKraft = builder.enableKRaft;
         this.clusterId = builder.clusterId;
+        this.collectLogs = builder.collectLogs;
+        this.logFilePath = builder.logFilePath;
 
         validateBrokerNum(this.brokersNum);
         validateInternalTopicReplicationFactor(this.internalTopicReplicationFactor, this.brokersNum);
@@ -123,6 +127,17 @@ public class StrimziKafkaCluster implements KafkaContainer {
                         .waitForRunning();
                 }
 
+                if (this.collectLogs) {
+                    if (this.logFilePath == null || this.logFilePath.isEmpty()) {
+                        this.logFilePath = "target/strimzi-test-container";
+                    }
+
+                    kafkaContainer
+                        .withLogCollection()
+                        .withLogFilePath(this.logFilePath);
+                    LOGGER.info("Collecting logs is enabled. The logs will be accessible in dir: {}", kafkaContainer.getLogFilePath());
+                }
+
                 LOGGER.info("Started broker with id: {}", kafkaContainer);
 
                 return kafkaContainer;
@@ -157,6 +172,8 @@ public class StrimziKafkaCluster implements KafkaContainer {
         private String kafkaVersion;
         private boolean enableKRaft;
         private String clusterId;
+        private boolean collectLogs;
+        private String logFilePath;
 
         /**
          * Sets the number of Kafka brokers in the cluster.
@@ -239,6 +256,16 @@ public class StrimziKafkaCluster implements KafkaContainer {
          */
         public StrimziKafkaClusterBuilder withKraft() {
             this.enableKRaft = true;
+            return this;
+        }
+
+        public StrimziKafkaClusterBuilder withLogCollection() {
+            this.collectLogs = true;
+            return this;
+        }
+
+        public StrimziKafkaClusterBuilder withLogFilePath(String logFilePath) {
+            this.logFilePath = logFilePath;
             return this;
         }
 
@@ -325,7 +352,7 @@ public class StrimziKafkaCluster implements KafkaContainer {
         additionalKafkaConfiguration.put("controller.quorum.voters", quorumVoters);
     }
 
-    @SuppressWarnings({"CyclomaticComplexity", "NPathComplexity"})
+    @SuppressWarnings({"CyclomaticComplexity", "NPathComplexity", "JavaNCSS"})
     @Override
     @DoNotMutate
     public void start() {
@@ -334,8 +361,10 @@ public class StrimziKafkaCluster implements KafkaContainer {
             Startables.deepStart(startables).get(60, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            if (this.collectLogs) this.stop();
             throw new RuntimeException("Interrupted while starting Kafka containers", e);
         } catch (ExecutionException | UnsupportedKraftKafkaVersionException e) {
+            if (this.collectLogs) this.stop();
             Throwable cause = e.getCause();
             if (cause instanceof UnsupportedKraftKafkaVersionException) {
                 throw (UnsupportedKraftKafkaVersionException) cause;
@@ -343,6 +372,7 @@ public class StrimziKafkaCluster implements KafkaContainer {
                 throw new RuntimeException("Failed to start Kafka containers", e);
             }
         } catch (TimeoutException e) {
+            if (this.collectLogs) this.stop();
             throw new RuntimeException("Timed out while starting Kafka containers", e);
         }
 

@@ -106,6 +106,18 @@ public class StrimziKafkaKRaftClusterIT extends AbstractIT {
     }
 
     @Test
+    void testKafkaClusterStartupWithLogCollection() throws InterruptedException, ExecutionException {
+        systemUnderTest = new StrimziKafkaCluster.StrimziKafkaClusterBuilder()
+            .withNumberOfBrokers(NUMBER_OF_REPLICAS)
+            .withKraft()
+            .withLogCollection()
+            .build();
+        systemUnderTest.start();
+
+        verifyReadinessOfKRaftCluster();
+    }
+
+    @Test
     void testStartClusterWithProxyContainer() {
         ToxiproxyContainer proxyContainer = new ToxiproxyContainer(
                 DockerImageName.parse("ghcr.io/shopify/toxiproxy:2.11.0")

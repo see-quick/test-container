@@ -20,6 +20,8 @@ import org.testcontainers.containers.wait.strategy.WaitStrategy;
 import org.testcontainers.images.builder.Transferable;
 import org.testcontainers.utility.MountableFile;
 
+import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UncheckedIOException;
@@ -113,6 +115,10 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
 
     private AuthenticationType authenticationType = AuthenticationType.NONE;
 
+    private boolean collectLogs;
+    // default
+    private String logFilePath = "target/strimzi-test-container";
+
     /**
      * Image name is specified lazily automatically in {@link #doStart()} method
      */
@@ -193,6 +199,27 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
     @Override
     @DoNotMutate
     public void stop() {
+        if (this.collectLogs && this.getContainerId() != null) {
+            try {
+                final String logs = this.getLogs();
+
+                // Include the current date in the log directory path
+                final File logDir = new File(logFilePath, Utils.CURRENT_DATE);  // target/strimzi-test-container/DATE
+
+                // Ensure the log directory exists
+                if (!logDir.exists()) {
+                    logDir.mkdirs();
+                }
+
+                final File logFile = new File(logDir, "kafka-container-" + this.getContainerId() + ".log");
+                try (FileWriter writer = new FileWriter(logFile)) {
+                    writer.write(logs);
+                }
+            } catch (IOException e) {
+                LOGGER.error("Failed to write container logs to file", e);
+            }
+        }
+
         if (proxyContainer != null && proxyContainer.isRunning()) {
             proxyContainer.stop();
         }
@@ -436,7 +463,7 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
         properties.setProperty("socket.send.buffer.bytes", "102400");
         properties.setProperty("socket.receive.buffer.bytes", "102400");
         properties.setProperty("socket.request.max.bytes", "104857600");
-        properties.setProperty("log.dirs", "/tmp/default-log-dir");
+        properties.setProperty("log.dirs", "/tmp/default-log-dir-" + this.brokerId);
         properties.setProperty("num.partitions", "1");
         properties.setProperty("num.recovery.threads.per.data.dir", "1");
         properties.setProperty("offsets.topic.replication.factor", "1");
@@ -854,6 +881,19 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
         return self();
     }
 
+    // Method to enable or disable log collection
+    public StrimziKafkaContainer withLogCollection() {
+        this.collectLogs = true;
+        return this;
+    }
+
+
+    // Method to set custom log file path
+    public StrimziKafkaContainer withLogFilePath(String logFilePath) {
+        this.logFilePath = logFilePath;
+        return this;
+    }
+
     /**
      * Retrieves a synchronized Proxy instance for this Kafka broker.
      *
@@ -891,6 +931,10 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
 
     /* test */ int getBrokerId() {
         return brokerId;
+    }
+
+    /* test */ String getLogFilePath() {
+        return logFilePath;
     }
 
     /**
