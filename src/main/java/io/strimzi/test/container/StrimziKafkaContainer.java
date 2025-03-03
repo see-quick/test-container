@@ -260,6 +260,9 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
         // copy override file to the container
         if (this.useKraft) {
             copyFileToContainer(Transferable.of(serverPropertiesWithOverride.getBytes(StandardCharsets.UTF_8)), "/opt/kafka/config/kraft/server.properties");
+
+            // copy also AppCDS for quicker JVM init
+            copyFileToContainer(MountableFile.forClasspathResource("strimzi-cds.jsa"), "/opt/kafka/strimzi-cds.jsa");
         } else {
             copyFileToContainer(Transferable.of(serverPropertiesWithOverride.getBytes(StandardCharsets.UTF_8)), "/opt/kafka/config/server.properties");
         }
@@ -278,6 +281,11 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
                 this.clusterId = this.randomUuid();
                 LOGGER.info("New `cluster.id` has been generated: {}", this.clusterId);
             }
+
+            // Append to existing KAFKA_OPTS
+            // -Xlog:class+load=info  - for seeing class loading... 0.8s
+            // -Xlog:cds - for CDS (Class Data Sharing)
+            command += "export KAFKA_OPTS=\"-XX:+UseCompressedClassPointers -XX:+UseCompressedOops -Xshare:on -XX:SharedArchiveFile=/opt/kafka/strimzi-cds.jsa\"\n";
 
             command += "bin/kafka-storage.sh format -t=\"" + this.clusterId + "\" -c /opt/kafka/config/kraft/server.properties \n";
             command += "bin/kafka-server-start.sh /opt/kafka/config/kraft/server.properties \n";

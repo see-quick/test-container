@@ -67,6 +67,29 @@ public class StrimziKafkaKraftContainerIT extends AbstractIT {
             systemUnderTest.getHost() + ":" + systemUnderTest.getMappedPort(9092)));
     }
 
+    @Test
+    void testStartContainerWithStartupTime() {
+        Map<String, String> kafkaConfiguration = new HashMap<>();
+
+        kafkaConfiguration.put("log.cleaner.enable", "false");
+        kafkaConfiguration.put("auto.create.topics.enable", "false");
+        kafkaConfiguration.put("controller.quorum.election.timeout.ms", "500");
+        kafkaConfiguration.put("controller.quorum.append.linger.ms", "25");
+
+        systemUnderTest = new StrimziKafkaContainer()
+            .withBrokerId(1)
+            .withKafkaConfigurationMap(kafkaConfiguration)
+            .withKraft()
+            .waitForRunning();
+
+        long startTime = System.nanoTime();  // Capture start time
+        systemUnderTest.start();
+        long endTime = System.nanoTime();  // Capture end time
+
+        long startupTimeMillis = (endTime - startTime) / 1_000_000; // Convert to milliseconds
+        System.out.println("Kafka container startup time: " + startupTimeMillis + " ms");
+    }
+
     @ParameterizedTest(name = "testStartContainerWithSomeConfiguration-{0}")
     @MethodSource("retrieveKafkaVersionsFile")
     void testStartContainerWithSomeConfiguration(final String imageName, final String kafkaVersion) throws ExecutionException, InterruptedException, TimeoutException {
