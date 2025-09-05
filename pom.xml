@@ -114,7 +114,7 @@
         <!-- for Java 11 compatibility (newer versions does not support Java 11)  -->
         <testcontainers-keycloak.version>2.6.0</testcontainers-keycloak.version>
         <fasterxml.jackson-annotations.version>2.16.2</fasterxml.jackson-annotations.version>
-        <kafka-oauth-client.version>0.16.2</kafka-oauth-client.version>
+        <kafka-oauth-client.version>0.17.0-RC1</kafka-oauth-client.version>
         <mockito.version>5.17.0</mockito.version>
 
         <!-- PLUGIN VERSIONS       -->
