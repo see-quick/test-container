@@ -917,4 +917,106 @@ class StrimziKafkaContainerTest {
     void testWithLogFilePathTrimsWhitespace() {
         assertDoesNotThrow(() -> kafkaContainer.withLogCollection("  target/test-logs/  "));
     }
+
+    @Test
+    void testExtractControllerListenerSingleController() {
+        Properties props = new Properties();
+        String adv = "CONTROLLER://broker-1:9094";
+        kafkaContainer.extractControllerListener(props, adv);
+
+        assertThat(props.getProperty("advertised.listeners"), is("CONTROLLER://broker-1:9094"));
+    }
+
+    @Test
+    void testExtractControllerListenerMultipleListenersPicksController() {
+        Properties props = new Properties();
+        String adv = "PLAINTEXT://localhost:9092,CONTROLLER://broker-1:9094,SASL_PLAINTEXT://localhost:9093";
+
+        kafkaContainer.extractControllerListener(props, adv);
+
+        assertThat(props.getProperty("advertised.listeners"), is("CONTROLLER://broker-1:9094"));
+    }
+
+    @Test
+    void testExtractControllerListenerNoControllerNoChange() {
+        Properties props = new Properties();
+        props.setProperty("advertised.listeners", "PLAINTEXT://localhost:9092");
+        String adv = "PLAINTEXT://localhost:9092,SASL_PLAINTEXT://localhost:9093";
+
+        kafkaContainer.extractControllerListener(props, adv);
+
+        assertThat(props.getProperty("advertised.listeners"), is("PLAINTEXT://localhost:9092"));
+    }
+
+    @Test
+    void testExtractControllerListenerTrimsWhitespace() {
+        Properties props = new Properties();
+        String adv = "PLAINTEXT://localhost:9092,   CONTROLLER://broker-1:9094   ,SASL_PLAINTEXT://localhost:9093";
+
+        kafkaContainer.extractControllerListener(props, adv);
+
+        assertThat(props.getProperty("advertised.listeners"), is("CONTROLLER://broker-1:9094"));
+    }
+
+    @Test
+    void testExtractControllerListenerMultipleControllersPicksFirst() {
+        Properties props = new Properties();
+        String adv = "CONTROLLER://broker-1:9094,CONTROLLER://broker-2:9094";
+
+        kafkaContainer.extractControllerListener(props, adv);
+
+        assertThat(props.getProperty("advertised.listeners"), is("CONTROLLER://broker-1:9094"));
+    }
+
+    @Test
+    void testExtractControllerListenerEmptyInputNoChange() {
+        Properties props = new Properties();
+        kafkaContainer.extractControllerListener(props, "");
+
+        assertThat(props.getProperty("advertised.listeners"), nullValue());
+    }
+
+    @Test
+    void testWithPortReturnsThis() {
+        StrimziKafkaContainer result = kafkaContainer.withPort(9092);
+        assertSame(kafkaContainer, result);
+    }
+
+    @Test
+    void testWithProxyContainerSetsNetworkAliases() {
+        ToxiproxyContainer proxyContainer = new ToxiproxyContainer();
+        kafkaContainer.withProxyContainer(proxyContainer);
+        
+        assertThat(proxyContainer.getNetworkAliases(), hasItem("toxiproxy"));
+    }
+
+    @Test
+    void testWithProxyContainerWithNull() {
+        StrimziKafkaContainer result = kafkaContainer.withProxyContainer(null);
+        assertSame(kafkaContainer, result);
+    }
+
+    @Test
+    void testSetKRaftPropertiesWithExistingControllerQuorumVoters() {
+        Map<String, String> kafkaConfig = Map.of("controller.quorum.voters", "1@custom:9094");
+        StrimziKafkaContainer container = new StrimziKafkaContainer()
+            .withKafkaConfigurationMap(kafkaConfig)
+            .withNodeRole(KafkaNodeRole.MIXED)
+            .withNodeId(1)
+            .withBrokerId(1);
+        container.listenerNames.add("PLAINTEXT");
+        
+        Properties defaultProps = container.buildDefaultServerProperties(
+            "PLAINTEXT://0.0.0.0:9092", 
+            "PLAINTEXT://localhost:9092"
+        );
+        
+        // The buildDefaultServerProperties should skip setting default quorum voters when already configured
+        // This tests the conditional: if (this.kafkaConfigurationMap == null || !this.kafkaConfigurationMap.containsKey("controller.quorum.voters"))
+        assertThat(defaultProps.getProperty("controller.quorum.voters"), nullValue());
+        
+        // Test that the override happens during overrideProperties
+        String finalProperties = container.overrideProperties(defaultProps, kafkaConfig);
+        assertThat(finalProperties, containsString("controller.quorum.voters=1@custom\\:9094"));
+    }
 }
