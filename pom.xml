@@ -473,5 +473,60 @@
                 </plugins>
             </build>
         </profile>
+        <profile>
+            <id>benchmark</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>${maven-surefire-failsafe-plugin.version}</version>
+                        <configuration>
+                            <skipTests>false</skipTests>
+                            <includes>
+                                <include>**/*Benchmark*.java</include>
+                            </includes>
+                            <systemPropertyVariables>
+                                <benchmark.warmup.runs>${benchmark.warmup.runs}</benchmark.warmup.runs>
+                                <benchmark.measurement.runs>${benchmark.measurement.runs}</benchmark.measurement.runs>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <id>run-benchmark-runner</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>java</goal>
+                                </goals>
+                                <configuration>
+                                    <mainClass>io.strimzi.test.container.benchmarks.BenchmarkRunner</mainClass>
+                                    <arguments>
+                                        <argument>${benchmark.type}</argument>
+                                        <argument>${benchmark.runs}</argument>
+                                        <argument>${benchmark.warmup}</argument>
+                                    </arguments>
+                                    <classpathScope>test</classpathScope>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+            <properties>
+                <benchmark.type>comparison</benchmark.type>
+                <benchmark.runs>5</benchmark.runs>
+                <benchmark.warmup>2</benchmark.warmup>
+                <benchmark.warmup.runs>2</benchmark.warmup.runs>
+                <benchmark.measurement.runs>5</benchmark.measurement.runs>
+            </properties>
+        </profile>
     </profiles>
 </project>
