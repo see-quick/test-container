@@ -129,6 +129,9 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
     // Log collection attributes
     private String logFilePath;
 
+    // Native image support
+    private boolean useNativeImage = false;
+
     /**
      * Image name is specified lazily automatically in {@link #doStart()} method
      */
@@ -173,7 +176,12 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
 
         // Setup image name
         if (!this.imageNameProvider.isDone()) {
-            this.imageNameProvider.complete(KafkaVersionService.strimziTestContainerImageName(this.kafkaVersion));
+            if (this.useNativeImage) {
+                this.imageNameProvider.complete("apache/kafka-native:latest");
+                LOGGER.info("Using Apache Kafka native image for faster startup");
+            } else {
+                this.imageNameProvider.complete(KafkaVersionService.strimziTestContainerImageName(this.kafkaVersion));
+            }
         }
 
         if (this.nodeRole == KafkaNodeRole.CONTROLLER) {
@@ -1150,5 +1158,30 @@ public class StrimziKafkaContainer extends GenericContainer<StrimziKafkaContaine
      */
     public KafkaNodeRole getNodeRole() {
         return nodeRole;
+    }
+
+    /**
+     * Fluent method to enable Apache Kafka native image support.
+     * When enabled, the container will use the apache/kafka-native image
+     * which provides faster startup times using GraalVM native image.
+     *
+     * Note: This option is experimental and may have limitations compared
+     * to the standard Strimzi Kafka image.
+     *
+     * @param useNativeImage true to use native image, false to use standard image
+     * @return StrimziKafkaContainer instance for method chaining
+     */
+    public StrimziKafkaContainer withNativeImage(boolean useNativeImage) {
+        this.useNativeImage = useNativeImage;
+        return self();
+    }
+
+    /**
+     * Checks if native image is enabled.
+     *
+     * @return true if native image is enabled, false otherwise
+     */
+    public boolean isNativeImageEnabled() {
+        return this.useNativeImage;
     }
 }
