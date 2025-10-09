@@ -48,6 +48,7 @@ public class StrimziKafkaCluster implements KafkaContainer {
     private final String kafkaVersion;
     private final boolean useDedicatedRoles;
     private final String logFilePath;
+    private final boolean useNativeImage;
 
     // not editable
     private final Network network;
@@ -72,6 +73,7 @@ public class StrimziKafkaCluster implements KafkaContainer {
         this.kafkaVersion = builder.kafkaVersion;
         this.clusterId = builder.clusterId;
         this.logFilePath = builder.logFilePath;
+        this.useNativeImage = builder.useNativeImage;
 
         validateBrokerNum(this.brokersNum);
         if (this.isUsingDedicatedRoles()) {
@@ -110,43 +112,105 @@ public class StrimziKafkaCluster implements KafkaContainer {
 
     @SuppressWarnings("deprecation")
     private void prepareCombinedRolesCluster(final Map<String, String> kafkaConfiguration, final String kafkaVersion) {
-        // multi-node set up with combined roles
-        this.nodes = IntStream
-            .range(0, this.brokersNum)
-            .mapToObj(brokerId -> {
-                LOGGER.info("Starting combined-role node with id {}", brokerId);
-                // adding broker id for each kafka container
-                StrimziKafkaContainer kafkaContainer = new StrimziKafkaContainer()
-                    .withBrokerId(brokerId)
-                    .withKafkaConfigurationMap(kafkaConfiguration)
-                    .withNetwork(this.network)
-                    .withProxyContainer(proxyContainer)
-                    .withKafkaVersion(kafkaVersion == null ? KafkaVersionService.getInstance().latestRelease().getVersion() : kafkaVersion)
-                    // One must set `node.id` to the same value as `broker.id` if we use KRaft mode
-                    .withNodeId(brokerId)
-                    // pass shared `cluster.id` to each broker
-                    .withClusterId(this.clusterId)
-                    .withNodeRole(KafkaNodeRole.COMBINED)
-                    .waitForRunning();
+        if (this.useNativeImage) {
+            // Native image implementation - combined roles
+            // Native images use environment variables for configuration, which are set before the container starts.
+            // Since we can't dynamically update advertised.listeners with mapped ports (like StrimziKafkaContainer does),
+            // we use fixed port mappings and override the advertised.listeners configuration.
+            this.nodes = IntStream
+                .range(0, this.brokersNum)
+                .mapToObj(nodeId -> {
+                    LOGGER.info("Starting native Kafka combined-role node with id {}", nodeId);
 
-                if (this.logFilePath != null) {
-                    kafkaContainer.withLogCollection(this.logFilePath);
-                }
+                    // Determine image name for native
+                    String imageName = kafkaVersion != null
+                        ? NativeKafkaContainer.DEFAULT_IMAGE_NAME + ":" + kafkaVersion
+                        : NativeKafkaContainer.DEFAULT_IMAGE_NAME + ":" + NativeKafkaContainer.DEFAULT_TAG;
 
-                LOGGER.info("Started combined role node with id: {}", kafkaContainer);
+                    // Calculate fixed port for this node's EXTERNAL listener
+                    // Use a base port and increment by node ID to avoid collisions
+                    final int baseExternalPort = 19092;  // Start at 19092 to avoid conflicts with default Kafka port
+                    final int fixedExternalPort = baseExternalPort + nodeId;
 
-                return kafkaContainer;
-            })
-            .collect(Collectors.toList());
+                    // Create a copy of the kafka configuration and override advertised.listeners
+                    Map<String, String> nodeConfig = new HashMap<>(kafkaConfiguration);
+
+                    // Override advertised.listeners to use the fixed external port
+                    // INTERNAL uses network alias for inter-broker, EXTERNAL uses localhost with fixed port, CONTROLLER uses network alias
+                    String advertisedListeners = String.format(
+                        "INTERNAL://%s%d:%d,EXTERNAL://localhost:%d,CONTROLLER://%s%d:%d",
+                        NativeKafkaContainer.NETWORK_ALIAS_PREFIX, nodeId, NativeKafkaContainer.INTERNAL_PORT,
+                        fixedExternalPort,  // Use the fixed external port
+                        NativeKafkaContainer.NETWORK_ALIAS_PREFIX, nodeId, NativeKafkaContainer.CONTROLLER_PORT
+                    );
+                    nodeConfig.put("advertised.listeners", advertisedListeners);
+
+                    LOGGER.info("Native Kafka node {} advertised.listeners: {}", nodeId, advertisedListeners);
+
+                    NativeKafkaContainer kafkaContainer = new NativeKafkaContainer(imageName)
+                        .withNodeId(nodeId)
+                        .withKafkaConfigurationMap(nodeConfig)  // Use the modified config with overridden advertised.listeners
+                        .withClusterId(this.clusterId)
+                        .withNetwork(this.network)
+                        .withPort(fixedExternalPort)  // Use fixed port mapping
+                        .waitForRunning();
+
+                    if (this.logFilePath != null) {
+                        kafkaContainer.withLogCollection(this.logFilePath);
+                    }
+
+                    LOGGER.info("Started native Kafka combined role node with id: {} on fixed port: {}", nodeId, fixedExternalPort);
+                    return kafkaContainer;
+                })
+                .collect(Collectors.toList());
+        } else {
+            // JVM implementation - combined roles
+            this.nodes = IntStream
+                .range(0, this.brokersNum)
+                .mapToObj(brokerId -> {
+                    LOGGER.info("Starting JVM Kafka combined-role node with id {}", brokerId);
+                    // adding broker id for each kafka container
+                    StrimziKafkaContainer kafkaContainer = new StrimziKafkaContainer()
+                        .withBrokerId(brokerId)
+                        .withKafkaConfigurationMap(kafkaConfiguration)
+                        .withNetwork(this.network)
+                        .withProxyContainer(proxyContainer)
+                        .withKafkaVersion(kafkaVersion == null ? KafkaVersionService.getInstance().latestRelease().getVersion() : kafkaVersion)
+                        // One must set `node.id` to the same value as `broker.id` if we use KRaft mode
+                        .withNodeId(brokerId)
+                        // pass shared `cluster.id` to each broker
+                        .withClusterId(this.clusterId)
+                        .withNodeRole(KafkaNodeRole.COMBINED)
+                        .waitForRunning();
+
+                    if (this.logFilePath != null) {
+                        kafkaContainer.withLogCollection(this.logFilePath);
+                    }
+
+                    LOGGER.info("Started JVM Kafka combined role node with id: {}", kafkaContainer);
+
+                    return kafkaContainer;
+                })
+                .collect(Collectors.toList());
+        }
     }
 
     @SuppressWarnings("deprecation")
     private void prepareDedicatedRolesCluster(final Map<String, String> kafkaConfiguration, final String kafkaVersion) {
+        if (this.useNativeImage) {
+            // Native image does not support dedicated roles yet - throw exception
+            throw new UnsupportedOperationException(
+                "Native Kafka images (apache/kafka-native) do not currently support dedicated controller/broker roles. " +
+                "Please use combined roles (remove withDedicatedRoles()) or use JVM-based images (remove withNativeImage())."
+            );
+        }
+
+        // JVM implementation - dedicated roles
         // Create controller nodes - they get the first set of IDs
         this.controllers = IntStream
             .range(0, this.controllersNum)
             .mapToObj(controllerId -> {
-                LOGGER.info("Starting controller-only node with id {}", controllerId);
+                LOGGER.info("Starting JVM Kafka controller-only node with id {}", controllerId);
                 StrimziKafkaContainer controllerContainer = new StrimziKafkaContainer()
                     .withBrokerId(controllerId)
                     .withKafkaConfigurationMap(kafkaConfiguration)
@@ -161,7 +225,7 @@ public class StrimziKafkaCluster implements KafkaContainer {
                     controllerContainer.withLogCollection(this.logFilePath);
                 }
 
-                LOGGER.info("Started controller-only node with id: {}", controllerContainer);
+                LOGGER.info("Started JVM Kafka controller-only node with id: {}", controllerContainer);
                 return controllerContainer;
             })
             .collect(Collectors.toList());
@@ -173,8 +237,8 @@ public class StrimziKafkaCluster implements KafkaContainer {
                 // Use broker IDs that start after the highest controller ID to avoid conflicts
                 int brokerId = this.controllersNum + brokerIndex;
 
-                LOGGER.info("Starting broker-only node with broker.id={}", brokerId);
-                
+                LOGGER.info("Starting JVM Kafka broker-only node with broker.id={}", brokerId);
+
                 StrimziKafkaContainer brokerContainer = new StrimziKafkaContainer()
                     .withBrokerId(brokerId)
                     .withKafkaConfigurationMap(kafkaConfiguration)
@@ -190,7 +254,7 @@ public class StrimziKafkaCluster implements KafkaContainer {
                     brokerContainer.withLogCollection(this.logFilePath);
                 }
 
-                LOGGER.info("Started broker-only node with id: {}", brokerContainer);
+                LOGGER.info("Started JVM Kafka broker-only node with id: {}", brokerContainer);
                 return brokerContainer;
             })
             .collect(Collectors.toList());
@@ -238,6 +302,7 @@ public class StrimziKafkaCluster implements KafkaContainer {
         private String kafkaVersion;
         private String clusterId;
         private String logFilePath;
+        private boolean useNativeImage;
 
         /**
          * Sets the number of Kafka brokers in the cluster.
@@ -366,6 +431,18 @@ public class StrimziKafkaCluster implements KafkaContainer {
         }
 
         /**
+         * Enables native image support for the Kafka cluster.
+         * When enabled, the cluster will use Apache Kafka native images (apache/kafka-native)
+         * which provide faster startup times using GraalVM native compilation.
+         *
+         * @return the current instance of {@code StrimziKafkaClusterBuilder} for method chaining
+         */
+        public StrimziKafkaClusterBuilder withNativeImage() {
+            this.useNativeImage = true;
+            return this;
+        }
+
+        /**
          * Builds and returns a {@code StrimziKafkaCluster} instance based on the provided configurations.
          *
          * @return a new instance of {@code StrimziKafkaCluster}
@@ -398,7 +475,13 @@ public class StrimziKafkaCluster implements KafkaContainer {
     @DoNotMutate
     public String getNetworkBootstrapServers() {
         return getBrokers().stream()
-                .map(broker -> ((StrimziKafkaContainer) broker).getNetworkBootstrapServers())
+                .map(broker -> {
+                    if (broker instanceof NativeKafkaContainer) {
+                        return ((NativeKafkaContainer) broker).getNetworkBootstrapServers();
+                    } else {
+                        return ((StrimziKafkaContainer) broker).getNetworkBootstrapServers();
+                    }
+                })
                 .collect(Collectors.joining(","));
     }
 
@@ -428,7 +511,13 @@ public class StrimziKafkaCluster implements KafkaContainer {
     @DoNotMutate
     public String getNetworkBootstrapControllers() {
         return getControllers().stream()
-                .map(controller -> ((StrimziKafkaContainer) controller).getNetworkBootstrapControllers())
+                .map(controller -> {
+                    if (controller instanceof NativeKafkaContainer) {
+                        return ((NativeKafkaContainer) controller).getNetworkBootstrapControllers();
+                    } else {
+                        return ((StrimziKafkaContainer) controller).getNetworkBootstrapControllers();
+                    }
+                })
                 .collect(Collectors.joining(","));
     }
 
@@ -447,16 +536,21 @@ public class StrimziKafkaCluster implements KafkaContainer {
     @SuppressWarnings("deprecation")
     private void configureQuorumVoters(final Map<String, String> additionalKafkaConfiguration) {
         final String quorumVoters;
-        
+
+        // Use the correct controller port based on whether we're using native images
+        final int controllerPort = this.useNativeImage
+            ? NativeKafkaContainer.CONTROLLER_PORT
+            : StrimziKafkaContainer.CONTROLLER_PORT;
+
         if (this.useDedicatedRoles) {
             // For dedicated roles, only controllers participate in the quorum
             quorumVoters = IntStream.range(0, this.controllersNum)
-                .mapToObj(controllerId -> String.format("%d@" + StrimziKafkaContainer.NETWORK_ALIAS_PREFIX + "%d:" + StrimziKafkaContainer.CONTROLLER_PORT, controllerId, controllerId))
+                .mapToObj(controllerId -> String.format("%d@" + StrimziKafkaContainer.NETWORK_ALIAS_PREFIX + "%d:" + controllerPort, controllerId, controllerId))
                 .collect(Collectors.joining(","));
         } else {
             // For combined roles, all nodes participate in the quorum
             quorumVoters = IntStream.range(0, this.brokersNum)
-                .mapToObj(brokerId -> String.format("%d@" + StrimziKafkaContainer.NETWORK_ALIAS_PREFIX + "%d:" + StrimziKafkaContainer.CONTROLLER_PORT, brokerId, brokerId))
+                .mapToObj(brokerId -> String.format("%d@" + StrimziKafkaContainer.NETWORK_ALIAS_PREFIX + "%d:" + controllerPort, brokerId, brokerId))
                 .collect(Collectors.joining(","));
         }
 
@@ -490,9 +584,9 @@ public class StrimziKafkaCluster implements KafkaContainer {
         try {
             // check broker nodes for quorum readiness (if combined-node then we check all nodes)
             Collection<KafkaContainer> brokersToCheck = getBrokers();
-            
+
             for (KafkaContainer kafkaContainer : brokersToCheck) {
-                if (!isBrokerReady((StrimziKafkaContainer) kafkaContainer)) {
+                if (!isBrokerReady(kafkaContainer)) {
                     return false;
                 }
             }
@@ -505,20 +599,38 @@ public class StrimziKafkaCluster implements KafkaContainer {
 
     @SuppressWarnings("deprecation")
     @DoNotMutate
-    private boolean isBrokerReady(StrimziKafkaContainer kafkaContainer) throws IOException, InterruptedException {
-        Container.ExecResult result = kafkaContainer.execInContainer(
-            "bash", "-c",
-            "bin/kafka-metadata-quorum.sh --bootstrap-server localhost:" + StrimziKafkaContainer.INTER_BROKER_LISTENER_PORT + " describe --status"
-        );
-        String output = result.getStdout();
+    private boolean isBrokerReady(KafkaContainer kafkaContainer) throws IOException, InterruptedException {
+        // Cast to GenericContainer to access execInContainer
+        GenericContainer<?> container = (GenericContainer<?>) kafkaContainer;
 
-        LOGGER.info("Metadata quorum status from broker {}: {}", kafkaContainer.getBrokerId(), output);
+        // Get node ID for logging
+        int nodeId = kafkaContainer instanceof NativeKafkaContainer
+            ? ((NativeKafkaContainer) kafkaContainer).getNodeId()
+            : ((StrimziKafkaContainer) kafkaContainer).getBrokerId();
 
-        if (output == null || output.isEmpty()) {
-            return false;
+        // For native images, the log-based wait strategy already confirms the broker is running
+        // Native images don't include kafka shell scripts, so we skip additional checks
+        if (this.useNativeImage) {
+            LOGGER.info("Native Kafka broker {} is ready (confirmed by log-based wait strategy)", nodeId);
+            return true;
+        } else {
+            // For JVM images, use the metadata quorum check
+            final int interBrokerPort = StrimziKafkaContainer.INTER_BROKER_LISTENER_PORT;
+
+            Container.ExecResult result = container.execInContainer(
+                "bash", "-c",
+                "bin/kafka-metadata-quorum.sh --bootstrap-server localhost:" + interBrokerPort + " describe --status"
+            );
+            String output = result.getStdout();
+
+            LOGGER.info("Metadata quorum status from broker {}: {}", nodeId, output);
+
+            if (output == null || output.isEmpty()) {
+                return false;
+            }
+
+            return isValidLeaderIdPresent(output);
         }
-
-        return isValidLeaderIdPresent(output);
     }
 
     @DoNotMutate

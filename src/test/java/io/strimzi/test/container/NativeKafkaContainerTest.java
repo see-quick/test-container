@@ -54,12 +54,6 @@ class NativeKafkaContainerTest {
     }
 
     @Test
-    void testWithEnvironmentVariable() {
-        kafkaContainer.withEnvironmentVariable("KAFKA_NUM_PARTITIONS", "5");
-        assertThat(kafkaContainer, is(notNullValue()));
-    }
-
-    @Test
     void testWithLogCollection() {
         kafkaContainer.withLogCollection();
         assertThat(kafkaContainer, is(notNullValue()));

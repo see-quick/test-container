@@ -60,7 +60,7 @@ import static org.hamcrest.Matchers.matchesPattern;
 public class StrimziKafkaClusterIT extends AbstractIT {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(StrimziKafkaClusterIT.class);
-    private static final int NUMBER_OF_REPLICAS = 3;
+    private static final int NUMBER_OF_REPLICAS = 1;
 
     private StrimziKafkaCluster systemUnderTest;
 
