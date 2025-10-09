@@ -128,7 +128,7 @@ class NativeKafkaContainer extends GenericContainer<NativeKafkaContainer> implem
     }
 
     /**
-     * Builds default Kafka configuration for standalone (single-node) usage.
+     * Builds default Kafka configuration for cluster usage.
      * This configuration is based on StrimziKafkaContainer's setCommonServerProperties and setKRaftProperties.
      * These defaults can be overridden by providing a kafkaConfigurationMap.
      *
@@ -142,40 +142,27 @@ class NativeKafkaContainer extends GenericContainer<NativeKafkaContainer> implem
         config.put("process.roles", "broker,controller");
         config.put("controller.listener.names", "CONTROLLER");
 
-        // Listener configuration - use dual listeners for cluster mode
-        if (this.clusterId != null) {
-            // Multi-node cluster configuration - use both internal and external listeners
-            // INTERNAL (9091) for inter-broker communication, EXTERNAL (9092) for clients outside Docker network
-            config.put("listeners",
-                String.format("INTERNAL://0.0.0.0:%d,EXTERNAL://0.0.0.0:%d,CONTROLLER://0.0.0.0:%d",
-                    INTERNAL_PORT, KAFKA_PORT, CONTROLLER_PORT));
+        // Multi-node cluster configuration (i.e., use both internal and external listeners)
+        config.put("listeners",
+            String.format("INTERNAL://0.0.0.0:%d,EXTERNAL://0.0.0.0:%d,CONTROLLER://0.0.0.0:%d",
+                INTERNAL_PORT, KAFKA_PORT, CONTROLLER_PORT));
 
-            // Advertised listeners:
-            // - INTERNAL uses network alias for inter-broker communication
-            // - EXTERNAL uses localhost (TestContainers will map this to the host)
-            // - CONTROLLER uses network alias for controller communication
-            config.put("advertised.listeners",
-                String.format("INTERNAL://%s%d:%d,EXTERNAL://localhost:%d,CONTROLLER://%s%d:%d",
-                    NETWORK_ALIAS_PREFIX, this.nodeId, INTERNAL_PORT,
-                    KAFKA_PORT,
-                    NETWORK_ALIAS_PREFIX, this.nodeId, CONTROLLER_PORT));
+        // Advertised listeners:
+        // - INTERNAL uses network alias for inter-broker communication
+        // - EXTERNAL uses localhost (TestContainers will map this to the host)
+        // - CONTROLLER uses network alias for controller communication
+        config.put("advertised.listeners",
+            String.format("INTERNAL://%s%d:%d,EXTERNAL://localhost:%d,CONTROLLER://%s%d:%d",
+                NETWORK_ALIAS_PREFIX, this.nodeId, INTERNAL_PORT,
+                KAFKA_PORT,
+                NETWORK_ALIAS_PREFIX, this.nodeId, CONTROLLER_PORT));
 
-            config.put("listener.security.protocol.map", "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT");
-            config.put("inter.broker.listener.name", "INTERNAL");
+        config.put("listener.security.protocol.map", "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT");
+        config.put("inter.broker.listener.name", "INTERNAL");
 
-            // For cluster mode, quorum voters will be provided by StrimziKafkaCluster
-            // Don't set default quorum voters here as the cluster provides the full list
-        } else {
-            // Standalone single-node configuration - use localhost
-            config.put("listeners", "PLAINTEXT://0.0.0.0:" + KAFKA_PORT + ",CONTROLLER://0.0.0.0:" + CONTROLLER_PORT);
-            config.put("advertised.listeners", "PLAINTEXT://localhost:" + KAFKA_PORT);
-            config.put("inter.broker.listener.name", "PLAINTEXT");
-            config.put("listener.security.protocol.map", "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT");
-
-            // For standalone containers, set default quorum voters
-            config.put("controller.quorum.voters",
-                String.format("%d@%s%d:%d", this.nodeId, NETWORK_ALIAS_PREFIX, this.nodeId, CONTROLLER_PORT));
-        }
+        // Note:
+        //  For cluster mode, quorum voters will be provided by StrimziKafkaCluster
+        //  Don't set default quorum voters here as the cluster provides the full list
 
         // Common server properties (from setCommonServerProperties)
         config.put("num.network.threads", "3");
@@ -227,10 +214,11 @@ class NativeKafkaContainer extends GenericContainer<NativeKafkaContainer> implem
         LOGGER.info("Mapped Kafka port (EXTERNAL listener): {}", kafkaExposedPort);
         LOGGER.info("Mapped controller port: {}", controllerExposedPort);
 
-        // For cluster mode, we need to update the advertised.listeners with the correct mapped port
-        // Unfortunately, we can't update environment variables after the container has started,
-        // so we need to set them before starting. This is a limitation of using environment variables
-        // with native Kafka images in TestContainers.
+        // Note:
+        //  For cluster mode, we need to update the advertised.listeners with the correct mapped port
+        //  Unfortunately, we can't update environment variables after the container has started,
+        //  so we need to set them before starting. This is a limitation of using environment variables
+        //  with native Kafka images in TestContainers.
     }
 
     @Override
@@ -290,14 +278,12 @@ class NativeKafkaContainer extends GenericContainer<NativeKafkaContainer> implem
 
     /**
      * Get the bootstrap servers that containers on the same network should use to connect.
-     * This uses the EXTERNAL listener for cluster mode (port 9092) and PLAINTEXT for standalone.
+     * This uses the INTERNAL listener for inter-broker and container network communication.
      *
      * @return Kafka bootstrap servers for container network
      */
     public String getNetworkBootstrapServers() {
-        // For containers on the same network, they should use the network alias
-        // In cluster mode, EXTERNAL listener uses port 9092, in standalone PLAINTEXT uses port 9092
-        return NETWORK_ALIAS_PREFIX + nodeId + ":" + KAFKA_PORT;
+        return NETWORK_ALIAS_PREFIX + nodeId + ":" + INTERNAL_PORT;
     }
 
     @Override

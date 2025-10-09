@@ -81,6 +81,15 @@ public class StrimziKafkaCluster implements KafkaContainer {
         }
         validateInternalTopicReplicationFactor(this.internalTopicReplicationFactor, this.brokersNum);
 
+        // Validate that native images are only used with single-node clusters
+        if (this.useNativeImage && this.brokersNum > 1) {
+            throw new UnsupportedOperationException(
+                "Native Kafka images (apache/kafka-native) currently only support single-node clusters. " +
+                    "Multi-node clusters (more than 1 replica) are not yet supported. " +
+                    "Please use a single broker (withNumberOfBrokers(1)) or use JVM-based images (remove withNativeImage())."
+            );
+        }
+
         if (this.proxyContainer != null) {
             this.proxyContainer.setNetwork(this.network);
         }

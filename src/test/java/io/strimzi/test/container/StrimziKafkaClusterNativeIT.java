@@ -57,22 +57,6 @@ public class StrimziKafkaClusterNativeIT {
         verifyKafkaOperations();
     }
 
-//    @Test
-//    void testMultipleNodeNativeCluster() throws ExecutionException, InterruptedException, TimeoutException {
-//        systemUnderTest = new StrimziKafkaCluster.StrimziKafkaClusterBuilder()
-//            .withNumberOfBrokers(3)
-//            .withNativeImage()
-//            .build();
-//
-//        systemUnderTest.start();
-//
-//        assertThat(systemUnderTest.getBootstrapServers(), notNullValue());
-//        assertThat(systemUnderTest.getBootstrapServers(), startsWith("PLAINTEXT://"));
-//
-//        // Verify basic Kafka operations
-//        verifyKafkaOperations();
-//    }
-
     @Test
     void testSingleNodeNativeClusterWithSpecificVersion() throws ExecutionException, InterruptedException, TimeoutException {
         // Using a specific Kafka native version
