@@ -161,7 +161,7 @@ public class StrimziKafkaClusterCompressionIT extends AbstractIT {
         System.out.println("If sizes are nearly identical (<5%), the cleaner ignores the configured level (bug).");
 
         // With the fix, level=9 compacted segments should be smaller
-        // than level=1, producing a measurable size difference (>2%).
+        // than level=1, producing a measurable size difference (>10%).
         // Without the fix, sizes would be nearly identical (<1%).
         assertThat(
             "Compacted segment sizes differ by " +
@@ -169,11 +169,11 @@ public class StrimziKafkaClusterCompressionIT extends AbstractIT {
                 " Level9=" + sizeHigh + ". The LogCleaner correctly applies " +
                 "topic-configured compression level during compaction.",
             diffPercent,
-            greaterThan(2.0));
+            greaterThan(10.0));
     }
 
     /**
-     * Produces initial data with ALL keys (0..999).
+     * Produces initial data with all keys.
      * Uses large linger.ms and batch.size so many keys land in each batch.
      */
     private void produceInitialData(String topicName, long seed) throws Exception {
@@ -207,9 +207,9 @@ public class StrimziKafkaClusterCompressionIT extends AbstractIT {
     }
 
     /**
-     * Overwrites only keys 0..499 (half the key space), leaving keys 500..999
-     * with their original values in old batches. This creates "dirty" batches
-     * where the cleaner must remove stale records and re-compress the survivors.
+     * Overwrites a subset of the key space, leaving the rest with their original
+     * values in old batches. This creates "dirty" batches where the cleaner must
+     * remove stale records and re-compress the survivors.
      */
     private void produceOverwriteData(String topicName, long seed) throws Exception {
         int overwriteKeys = 500;
@@ -245,21 +245,59 @@ public class StrimziKafkaClusterCompressionIT extends AbstractIT {
         int targetSize = 8192;
         StringBuilder sb = new StringBuilder(targetSize);
         int entryId = 0;
+        String[] eventTypes = {
+            "kafka.broker.metrics.snapshot",
+            "kafka.broker.request.completed",
+            "kafka.broker.replication.status",
+            "kafka.broker.partition.reassignment",
+            "kafka.broker.controller.election"
+        };
+        String[] hosts = {
+            "broker-0.kafka.svc.cluster.local",
+            "broker-1.kafka.svc.cluster.local",
+            "broker-2.kafka.svc.cluster.local"
+        };
+        String[] racks = {"us-east-1a", "us-east-1b", "us-west-2a", "eu-west-1a"};
+        String[] descriptions = {
+            "Periodic broker metrics snapshot for capacity planning and performance monitoring dashboard",
+            "Request processing completed with detailed latency breakdown and throughput measurements",
+            "Replication status report including ISR changes and under-replicated partition details",
+            "Partition reassignment progress update with bandwidth throttling and completion estimates",
+            "Controller election event with candidate broker information and epoch transition details"
+        };
         while (sb.length() < targetSize) {
-            sb.append("{\"eventType\":\"kafka.broker.log.compaction\",")
+            int type = entryId % eventTypes.length;
+            sb.append("{\"eventType\":\"").append(eventTypes[type]).append("\",")
                 .append("\"round\":").append(round).append(",")
                 .append("\"key\":").append(key).append(",")
                 .append("\"entryId\":").append(entryId++).append(",")
-                .append("\"timestamp\":\"2026-05-08T12:00:00.000Z\",")
-                .append("\"source\":{\"host\":\"broker-0.kafka.svc.cluster.local\",\"port\":9092,\"rack\":\"us-east-1a\"},")
-                .append("\"metrics\":{\"bytesIn\":").append(rng.nextInt(100000))
-                .append(",\"bytesOut\":").append(rng.nextInt(100000))
-                .append(",\"messagesIn\":").append(rng.nextInt(10000))
-                .append(",\"fetchRequests\":").append(rng.nextInt(5000))
-                .append(",\"produceRequests\":").append(rng.nextInt(5000))
-                .append("},\"tags\":[\"production\",\"tier-1\",\"kafka-cluster-main\",\"monitoring-enabled\"]")
-                .append(",\"description\":\"Periodic broker metrics snapshot for capacity planning and alerting\"}")
-                .append("\n");
+                .append("\"timestamp\":\"2026-05-08T12:").append(String.format("%02d", entryId % 60))
+                .append(":").append(String.format("%02d", rng.nextInt(60))).append(".000Z\",")
+                .append("\"source\":{")
+                .append("\"host\":\"").append(hosts[rng.nextInt(hosts.length)]).append("\",")
+                .append("\"port\":").append(9092 + rng.nextInt(3)).append(",")
+                .append("\"rack\":\"").append(racks[rng.nextInt(racks.length)]).append("\",")
+                .append("\"dataCenter\":\"").append(racks[rng.nextInt(racks.length)]).append("-dc").append(rng.nextInt(3)).append("\"")
+                .append("},")
+                .append("\"metrics\":{")
+                .append("\"bytesInPerSec\":").append(rng.nextInt(100000)).append(",")
+                .append("\"bytesOutPerSec\":").append(rng.nextInt(100000)).append(",")
+                .append("\"messagesInPerSec\":").append(rng.nextInt(10000)).append(",")
+                .append("\"totalFetchRequestsPerSec\":").append(rng.nextInt(5000)).append(",")
+                .append("\"totalProduceRequestsPerSec\":").append(rng.nextInt(5000)).append(",")
+                .append("\"requestLatencyMsP50\":").append(rng.nextInt(100)).append(",")
+                .append("\"requestLatencyMsP99\":").append(rng.nextInt(500)).append(",")
+                .append("\"requestLatencyMsP999\":").append(rng.nextInt(2000))
+                .append("},")
+                .append("\"partitionInfo\":{")
+                .append("\"leaderPartitions\":").append(rng.nextInt(200)).append(",")
+                .append("\"followerPartitions\":").append(rng.nextInt(200)).append(",")
+                .append("\"underReplicatedPartitions\":").append(rng.nextInt(5)).append(",")
+                .append("\"offlinePartitions\":").append(rng.nextInt(2))
+                .append("},")
+                .append("\"tags\":[\"production\",\"tier-1\",\"kafka-cluster-main\",\"monitoring-enabled\",\"auto-scaling-eligible\"],")
+                .append("\"description\":\"").append(descriptions[type]).append("\"")
+                .append("}\n");
         }
         return sb.toString();
     }
