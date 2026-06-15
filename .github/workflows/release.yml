@@ -29,6 +29,9 @@ jobs:
           releaseVersion: ${{ inputs.releaseVersion }}
           artifactSuffix: "strimzi-test-container"
 
+      - name: Run tests
+        run: mvn -B verify
+
       - uses: strimzi/github-actions/.github/actions/build/deploy-java@v1
         with:
           gpgPassphrase: ${{ secrets.GPG_PASSPHRASE }}
